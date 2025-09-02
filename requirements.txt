@@ -1,0 +1,6 @@
+## Updated Demo with Ollama Integration
+# nextgen_marketer_ollama.py
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import ollama
