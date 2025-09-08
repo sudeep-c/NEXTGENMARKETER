@@ -1,7 +1,6 @@
 from typing import List, Dict, Any
 from pathlib import Path
 import chromadb
-from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 import pandas as pd
 import uuid
@@ -20,7 +19,7 @@ def _embed(texts: List[str]) -> List[List[float]]:
     return embedder.encode(texts, normalize_embeddings=True).tolist()
 
 def get_client():
-    return chromadb.PersistentClient(path=PERSIST_DIR, settings=Settings(allow_reset=False))
+    return chromadb.PersistentClient(path=PERSIST_DIR)
 
 def get_collection(namespace: str):
     client = get_client()

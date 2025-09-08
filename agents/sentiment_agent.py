@@ -1,89 +1,64 @@
-# agents/sentiment_agent.py
-from utils.rag_utils import query_namespace
-from utils.llm_utils import ask_ollama
+from typing import Dict, Any
+import json
+import chromadb
+import ollama
 
-# ---- Config ----
-NAMESPACE = "sentiment"
-MODEL = "gemma2:9b"         # fast + good enough; pull with: ollama pull llama3.2:3b
-TOP_K = 4                      # fewer hits => faster
-EVIDENCE_CHAR_LIMIT = 1000     # trim what we send to the LLM
 
-def _pack_evidence_texts(hits):
-    """Compact the retrieved docs into a short bullet list for the LLM."""
-    parts, total = [], 0
-    for h in hits:
-        t = (h.get("text", "") or "").strip().replace("\n", " ")
-        if not t:
-            continue
-        if total + len(t) > EVIDENCE_CHAR_LIMIT:
-            t = t[: max(0, EVIDENCE_CHAR_LIMIT - total)]
-        parts.append(f"- {t}")
-        total += len(t)
-        if total >= EVIDENCE_CHAR_LIMIT:
-            break
-    return "\n".join(parts)
+class SentimentAgent:
+    def __init__(self, chroma_dir="./chroma_db", ollama_model="gpt-oss:20b", top_k=10):
+        # Connect to ChromaDB
+        self.client = chromadb.PersistentClient(path=chroma_dir)
+        self.collection = self.client.get_collection("sentiments_maruti")
+        self.ollama_model = ollama_model
+        self.top_k = top_k
 
-def _normalize_candidates(obj):
-    """Ensure candidates is a list[str]."""
-    out = []
-    if isinstance(obj, list):
-        for x in obj:
-            out.append(x if isinstance(x, str) else str(x))
-    elif isinstance(obj, str):
-        out = [obj]
-    return out[:3] or ["Campaign A"]  # sensible fallback
+    def retrieve_sentiment_data(self, query: str) -> str:
+        """
+        Retrieves top_k sentiment docs from Chroma relevant to query.
+        """
+        emb = ollama.embeddings(model="nomic-embed-text", prompt=query).embedding
+        results = self.collection.query(query_embeddings=[emb], n_results=self.top_k)
+        docs = results["documents"][0] if results and "documents" in results else []
+        return "\n\n".join(docs)
 
-def _extract_max_score(scores):
-    """Pick the max score from a list of numbers; fallback to 0.5."""
-    if isinstance(scores, list) and scores:
+    def analyze_sentiment(self, query: str = "Analyze Maruti customer sentiment") -> Dict[str, Any]:
+        """
+        Calls Ollama to analyze sentiment data and return structured insights.
+        """
+        sentiment_docs = self.retrieve_sentiment_data(query)
+
+        system_prompt = """
+        You are the Sentiment Analysis Agent for Maruti vehicles.
+        Analyze customer feedback (social posts, reviews, surveys) and return JSON with:
+        - summary (1–2 lines),
+        - key_metrics (positive %, negative %, neutral %, top regions, most mentioned models),
+        - insights (themes like service issues, price concerns, feature praise),
+        - recommendations (actions to improve brand perception or leverage positive buzz).
+
+        Only return valid JSON.
+        """
+
+        prompt = f"{system_prompt}\n\nCustomer Sentiment Data:\n{sentiment_docs}\n"
+
+        response = ollama.chat(model=self.ollama_model, messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ])
+
         try:
-            return float(max(scores))
+            result = json.loads(response["message"]["content"])
         except Exception:
-            return 0.5
-    return 0.5
+            result = {
+                "summary": response["message"]["content"],
+                "key_metrics": {},
+                "insights": [],
+                "recommendations": []
+            }
 
-def run(user_prompt: str, top_k: int = TOP_K):
-    # 1) Retrieve RAG evidence
-    hits = query_namespace(NAMESPACE, user_prompt, k=top_k)
+        return result
 
-    # 2) Build compact evidence blob
-    evidence_blob = _pack_evidence_texts(hits)
 
-    # 3) Ask the LLM (JSON-only)
-    prompt = f"""
-You are a Sentiment Analysis Agent.
-
-User question:
-"{user_prompt}"
-
-Evidence (summarized bullets from customer sentiment data):
-{evidence_blob if evidence_blob else "- (no evidence found)"}
-
-Task:
-- Based ONLY on sentiment signals, propose 1–3 relevant campaign or product ideas.
-- For each idea, assign a confidence score between 0.0 and 1.0 (float).
-- Keep reasoning concise.
-- Return STRICT JSON with these keys exactly:
-  {{
-    "candidates": ["<string>", "..."],
-    "scores": [<float>, ...],
-    "rationale": "<string>"
-  }}
-"""
-    parsed = ask_ollama(prompt, model=MODEL, json_mode=True)
-
-    # 4) Normalize outputs (defensive)
-    candidates = _normalize_candidates(parsed.get("candidates", []))
-    score = _extract_max_score(parsed.get("scores"))
-    rationale = str(parsed.get("rationale", ""))[:400]
-
-    # 5) Return standard agent schema (trim evidence for UI)
-    return {
-        "agent": "sentiment",
-        "candidates": candidates,
-        "score": score,
-        "rationale": rationale,
-        "evidence": hits[:2],  # keep just a couple for UI transparency
-    }
-
-#gemma2:9b
+if __name__ == "__main__":
+    agent = SentimentAgent()
+    output = agent.analyze_sentiment()
+    print(json.dumps(output, indent=2))

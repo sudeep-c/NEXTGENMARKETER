@@ -1,216 +1,304 @@
-# app.py
-import json
+#!/usr/bin/env python3
+"""
+NextGen Marketer - Streamlit App
+Main application for the multi-agent marketing system.
+"""
+
 import streamlit as st
+import json
 from orchestrator import run_flow
+
+def parse_agent_response(response_text):
+    """Parse agent response that might be JSON or plain text"""
+    if isinstance(response_text, str):
+        # Try to parse as JSON if it looks like JSON
+        if response_text.strip().startswith('```json') and response_text.strip().endswith('```'):
+            # Extract JSON from markdown code block
+            json_text = response_text.strip()[7:-3].strip()
+            try:
+                return json.loads(json_text)
+            except json.JSONDecodeError:
+                return {"summary": response_text}
+        elif response_text.strip().startswith('{') and response_text.strip().endswith('}'):
+            # Direct JSON string
+            try:
+                return json.loads(response_text)
+            except json.JSONDecodeError:
+                return {"summary": response_text}
+        else:
+            # Plain text response
+            return {"summary": response_text}
+    return response_text
 
 # try:
 #     from utils.llm_utils import ask_ollama
-#     _ = ask_ollama("ping", model="llama3.1:8b", json_mode=False)
+#     _ = ask_ollama("ping", model="gpt-oss:20b", json_mode=False)
 #     _ = ask_ollama("ping", model="gemma2:9b", json_mode=False)
 # except Exception:
 #     pass
 
 # ---------- Page config ----------
-st.set_page_config(page_title="Next-Gen Marketer", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="NextGen Marketer",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ---------- CSS ----------
 st.markdown("""
 <style>
-:root{
-  --bg:#faf7fb; --surface:#ffffff; --card:#ffffffcc;
-  --primary:#6b4eff; --secondary:#ff4ecb; --muted:#a09bb2; --text:#1b102a;
-  --radius:18px; --shadow:0 8px 24px rgba(32,0,64,0.10);
-}
-html, body, [data-testid="block-container"]{
-  background: radial-gradient(1200px 600px at 15% -10%, #ffe9f6 0%, #faf7fb 45%, #f7f2ff 100%);
-  color: var(--text);
-}
-header {visibility: hidden;}
-.container{ max-width: 1200px; margin: 0 auto; padding: 12px 16px 40px; }
-.hero{ display:flex; align-items:center; gap:18px; margin: 12px 0 18px; }
-.logo{ width:48px; height:48px; display:grid; place-items:center; border-radius:14px;
-       background: linear-gradient(135deg, var(--secondary), var(--primary)); color:#fff; font-weight:700; box-shadow: var(--shadow); }
-.h1{ font-size: 28px; font-weight: 800; letter-spacing:-0.02em; }
-.h2{ font-size: 18px; color: var(--muted); margin-top:2px; }
-.panel{ background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
-        padding: 18px; border: 1px solid rgba(107,78,255,0.08); }
-.btn-primary button{ background: linear-gradient(135deg, var(--primary), #9d7bff) !important;
-        color: #fff !important; border:none !important; border-radius:12px !important; box-shadow: var(--shadow); }
-.chips {display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;}
-.card{ background: var(--card); backdrop-filter: blur(8px); border-radius: var(--radius);
-       box-shadow: var(--shadow); padding: 14px; border: 1px solid rgba(107,78,255,0.10); }
-.card h4{ margin: 0 0 6px; font-size: 15px;}
-.badge{ display:inline-flex; align-items:center; gap:6px; background: #f7f2ff; color:#5a3cff;
-        border-radius:999px; padding:6px 10px; font-size:12px; border:1px solid rgba(107,78,255,0.18); }
-.kv{ display:grid; grid-template-columns: 140px 1fr; gap:8px; margin:4px 0;}
-.kv .k{ color:var(--muted); } .kv .v{ font-weight:600; }
-hr.sep{ border:none; height:1px; background: linear-gradient(90deg, transparent, rgba(107,78,255,0.25), transparent); margin: 12px 0; }
-.small{ color: var(--muted); font-size: 12px; }
-pre { white-space: pre-wrap; }
+    .main-header {
+        font-size: 3rem;
+        font-weight: bold;
+        text-align: center;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 2rem;
+    }
+    .agent-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------- Header ----------
-st.markdown("""
-<div class="container">
-  <div class="hero">
-    <div class="logo">NG</div>
-    <div>
-      <div class="h1">Next-Gen Marketer</div>
-      <div class="h2">Multi-agent orchestration · RAG · Generative campaign ideation</div>
-    </div>
-  </div>
-""", unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🚀 NextGen Marketer</h1>', unsafe_allow_html=True)
+st.markdown("### AI-Powered Multi-Agent Marketing Intelligence System")
 
-# ---------- Helpers ----------
-def stringify_channels(ch):
-    """Render channels field safely as a comma-separated string."""
-    if isinstance(ch, list):
-        out = []
-        for item in ch:
-            if isinstance(item, str):
-                out.append(item)
-            elif isinstance(item, dict):
-                val = item.get("name") or item.get("channel") or item.get("type")
-                out.append(str(val) if val is not None else json.dumps(item, ensure_ascii=False))
-            else:
-                out.append(str(item))
-        return ", ".join(out) if out else "—"
-    return str(ch or "—")
-
-def normalize_agent_outputs(outs_raw):
-    """Ensure each agent output is a dict with expected keys to avoid UI crashes."""
-    safe = []
-    for o in outs_raw or []:
-        if isinstance(o, dict):
-            safe.append(o)
+# ---------- Sidebar ----------
+with st.sidebar:
+    st.header("📊 System Status")
+    
+    # Check if data is available
+    try:
+        import os
+        if os.path.exists("./chroma_db"):
+            st.success("✅ ChromaDB: Connected")
         else:
-            safe.append({
-                "agent": "unknown",
-                "candidates": [],
-                "score": 0.0,
-                "rationale": str(o),
-                "evidence": []
-            })
-    return safe
+            st.error("❌ ChromaDB: Not found")
+    except:
+        st.error("❌ ChromaDB: Error")
+    
+    st.header("🤖 Available Agents")
+    st.markdown("""
+    - **Campaign Agent**: Analyzes campaign performance
+    - **Purchase Agent**: Studies buying patterns  
+    - **Sentiment Agent**: Monitors customer feedback
+    - **Marketer Agent**: Synthesizes insights
+    """)
+    
+    st.header("📈 Quick Stats")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Campaigns", "2,000")
+    with col2:
+        st.metric("Purchases", "2,000")
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        st.metric("Sentiments", "2,000")
+    with col4:
+        st.metric("PDF Docs", "10")
 
-# ---------- Controls Panel ----------
-with st.container():
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    col_prompt, col_run = st.columns([5, 1])
-    with col_prompt:
-        default_prompt = "Give me top 5 campaign ideas based on customer sentiments"
-        prompt = st.text_area("Your brief", value=default_prompt, height=90, label_visibility="collapsed")
-    with col_run:
-        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-        run_clicked = st.button("Run Orchestration ▶", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+# ---------- Main Content ----------
+st.header("💬 Ask Your Marketing Questions")
 
-    st.markdown('<div class="chips">', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("💬 Sentiment-only ideas", use_container_width=True):
-            prompt = "Give me top 5 campaign ideas based on customer sentiments"
-    with c2:
-        if st.button("🛒 Sentiment + Purchase strategy", use_container_width=True):
-            prompt = "Recommend a strategy using sentiments + purchase behavior"
-    with c3:
-        if st.button("🏆 Best overall strategy", use_container_width=True):
-            prompt = "What's the best overall campaign strategy?"
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+# Input area
+user_input = st.text_area(
+    "Enter your marketing question or request:",
+    placeholder="e.g., 'Analyze our campaign performance and suggest improvements for Q4'",
+    height=100
+)
 
-# ---------- Run & Results ----------
-if run_clicked:
-    with st.spinner("Running multi-agent workflow…"):
-        result = run_flow(prompt)
+# Action buttons
+col1, col2, col3 = st.columns([1, 1, 2])
+with col1:
+    analyze_btn = st.button("🔍 Analyze", type="primary")
+with col2:
+    clear_btn = st.button("🗑️ Clear")
+with col3:
+    st.markdown("*Powered by AI Agents*")
 
-    # Orchestrator meta
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown("#### Orchestrator")
-    st.markdown(
-        f'<span class="badge">Route: <b>{result.get("route","")}</b></span>',
-        unsafe_allow_html=True
-    )
+if clear_btn:
+    st.rerun()
 
-    # Agent outputs (defensive)
-    st.markdown('<hr class="sep"/>', unsafe_allow_html=True)
-    st.markdown("#### Specialist Agents")
-    outs = normalize_agent_outputs(result.get("agent_outputs", []))
-
-    # Grid of cards
-    cols = st.columns(3)
-    for idx, out in enumerate(outs):
-        with cols[idx % 3]:
-            agent = out.get("agent", "agent")
-            try:
-                score = float(out.get("score", 0.0) or 0.0)
-            except Exception:
-                score = 0.0
-            candidates = out.get("candidates", []) or ["—"]
-            rationale = out.get("rationale", "")
-            evidence = out.get("evidence", []) or []
-
-            st.markdown('<div class="card">', unsafe_allow_html=True)
-            st.markdown(f'<h4>{agent.title()} Agent</h4>', unsafe_allow_html=True)
-            st.markdown(f'<span class="badge">Confidence: {score:.2f}</span>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="kv"><div class="k">Candidates</div><div class="v">'
-                + ", ".join([f"`{str(c)}`" for c in candidates[:5]]) + '</div></div>',
-                unsafe_allow_html=True
-            )
-            if rationale:
-                st.markdown(f'<div class="kv"><div class="k">Rationale</div><div class="v">{rationale}</div></div>',
-                            unsafe_allow_html=True)
-
-            if evidence:
-                with st.expander("Evidence (top snippets)"):
-                    for ev in evidence[:3]:
-                        if isinstance(ev, dict):
-                            txt = (ev.get("text","") or "")[:500]
-                            meta = ev.get("metadata", {})
+# ---------- Analysis Results ----------
+if analyze_btn and user_input:
+    with st.spinner("🤖 AI agents are analyzing your request..."):
+        try:
+            # Run the multi-agent workflow
+            result = run_flow(user_input)
+            
+            # Display results
+            st.success("✅ Analysis Complete!")
+            
+            # Show agent outputs
+            if "agent_outputs" in result:
+                st.header("📊 Agent Insights")
+                
+                agent_names = ["Sentiment", "Purchase", "Campaign"]
+                for i, output in enumerate(result["agent_outputs"]):
+                    agent_name = agent_names[i] if i < len(agent_names) else f"Agent {i+1}"
+                    
+                    with st.expander(f"🤖 {agent_name} Agent", expanded=True):
+                        # Parse the output if it contains JSON
+                        parsed_output = output.copy()
+                        
+                        # If summary is a JSON string, parse it
+                        if "summary" in output and isinstance(output["summary"], str):
+                            parsed_summary = parse_agent_response(output["summary"])
+                            if isinstance(parsed_summary, dict):
+                                # Merge parsed JSON fields into the output
+                                parsed_output.update(parsed_summary)
+                        
+                        # Display summary
+                        if "summary" in parsed_output:
+                            summary_text = parsed_output["summary"]
+                            if isinstance(summary_text, str) and not (summary_text.strip().startswith('```json') or summary_text.strip().startswith('{')):
+                                st.write("**Summary:**")
+                                st.write(summary_text)
+                        
+                        # Display key metrics
+                        if "key_metrics" in parsed_output and parsed_output["key_metrics"]:
+                            st.write("**Key Metrics:**")
+                            if isinstance(parsed_output["key_metrics"], dict):
+                                for key, value in parsed_output["key_metrics"].items():
+                                    st.write(f"• **{key.replace('_', ' ').title()}:** {value}")
+                            else:
+                                st.json(parsed_output["key_metrics"])
+                        
+                        # Display insights
+                        if "insights" in parsed_output and parsed_output["insights"]:
+                            st.write("**Insights:**")
+                            for insight in parsed_output["insights"]:
+                                st.write(f"• {insight}")
+                        
+                        # Display recommendations
+                        if "recommendations" in parsed_output and parsed_output["recommendations"]:
+                            st.write("**Recommendations:**")
+                            for rec in parsed_output["recommendations"]:
+                                st.write(f"• {rec}")
+            
+            # Show final decision
+            if "final_decision" in result:
+                st.header("🎯 Final Marketing Strategy")
+                final = result["final_decision"]
+                
+                # Parse final decision if it's a JSON string
+                parsed_final = final.copy()
+                if isinstance(final, dict):
+                    # Check if any field contains JSON strings
+                    for key, value in final.items():
+                        if isinstance(value, str) and (value.strip().startswith('{') or value.strip().startswith('```json')):
+                            parsed_value = parse_agent_response(value)
+                            if isinstance(parsed_value, dict):
+                                parsed_final.update(parsed_value)
+                
+                # Display executive summary
+                if "executive_summary" in parsed_final:
+                    st.subheader("📋 Executive Summary")
+                    summary_text = parsed_final["executive_summary"]
+                    if isinstance(summary_text, str) and not (summary_text.strip().startswith('```json') or summary_text.strip().startswith('{')):
+                        st.write(summary_text)
+                    else:
+                        # If it's still JSON, try to extract the actual summary
+                        parsed_summary = parse_agent_response(summary_text)
+                        if isinstance(parsed_summary, dict) and "executive_summary" in parsed_summary:
+                            st.write(parsed_summary["executive_summary"])
                         else:
-                            txt = str(ev)[:500]
-                            meta = {}
-                        st.code(txt)
-                        if meta:
-                            st.caption(f"meta: {meta}")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # Final decision
-    st.markdown('<hr class="sep"/>', unsafe_allow_html=True)
-    st.markdown("#### Final Campaign Proposal")
-    final = result.get("final_decision", {}) or {}
-
-    campaign_name = final.get("campaign_name") or "New Campaign"
-    product = final.get("product") or "—"
-    region = final.get("region") or "—"
-    segment = final.get("segment") or "—"
-    concept = final.get("concept") or "—"
-    brief = final.get("content_brief") or "—"
-
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<h4>✨ {campaign_name}</h4>', unsafe_allow_html=True)
-    st.markdown(f'''
-    <div class="kv"><div class="k">Product</div><div class="v">{product}</div></div>
-    <div class="kv"><div class="k">Region</div><div class="v">{region}</div></div>
-    <div class="kv"><div class="k">Segment</div><div class="v">{segment}</div></div>
-    <div class="kv"><div class="k">Channels</div><div class="v">{stringify_channels(final.get("channels"))}</div></div>
-    <div class="kv"><div class="k">Concept</div><div class="v">{concept}</div></div>
-    ''', unsafe_allow_html=True)
-
-    with st.expander("Content Brief"):
-        st.write(brief)
-
-    pretty = json.dumps(final, indent=2, ensure_ascii=False)
-    st.download_button("Download Campaign JSON", data=pretty, file_name="campaign_proposal.json")
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)  # panel
+                            st.write(summary_text)
+                
+                # Display key findings
+                if "key_findings" in parsed_final and parsed_final["key_findings"]:
+                    st.subheader("🔍 Key Findings")
+                    key_findings = parsed_final["key_findings"]
+                    
+                    if isinstance(key_findings, dict):
+                        for category, findings in key_findings.items():
+                            st.write(f"**{category.title()}:**")
+                            if isinstance(findings, dict):
+                                for key, value in findings.items():
+                                    st.write(f"• {key}: {value}")
+                            else:
+                                st.write(f"• {findings}")
+                    elif isinstance(key_findings, list):
+                        for finding in key_findings:
+                            st.write(f"• {finding}")
+                    elif isinstance(key_findings, str):
+                        # If key_findings is a JSON string, parse it
+                        parsed_findings = parse_agent_response(key_findings)
+                        if isinstance(parsed_findings, dict) and "key_findings" in parsed_findings:
+                            findings_list = parsed_findings["key_findings"]
+                            if isinstance(findings_list, list):
+                                for finding in findings_list:
+                                    st.write(f"• {finding}")
+                        else:
+                            st.write(key_findings)
+                
+                # Display conflicts
+                if "conflicts" in parsed_final and parsed_final["conflicts"]:
+                    st.subheader("⚠️ Conflicts & Issues")
+                    conflicts = parsed_final["conflicts"]
+                    
+                    if isinstance(conflicts, list):
+                        for conflict in conflicts:
+                            st.write(f"• {conflict}")
+                    elif isinstance(conflicts, str):
+                        # If conflicts is a JSON string, parse it
+                        parsed_conflicts = parse_agent_response(conflicts)
+                        if isinstance(parsed_conflicts, dict) and "conflicts" in parsed_conflicts:
+                            conflicts_list = parsed_conflicts["conflicts"]
+                            if isinstance(conflicts_list, list):
+                                for conflict in conflicts_list:
+                                    st.write(f"• {conflict}")
+                        else:
+                            st.write(conflicts)
+                
+                # Display strategic recommendations
+                if "strategic_recommendations" in parsed_final and parsed_final["strategic_recommendations"]:
+                    st.subheader("🎯 Strategic Recommendations")
+                    recommendations = parsed_final["strategic_recommendations"]
+                    
+                    if isinstance(recommendations, list):
+                        for rec in recommendations:
+                            st.write(f"• {rec}")
+                    elif isinstance(recommendations, str):
+                        # If recommendations is a JSON string, parse it
+                        parsed_recs = parse_agent_response(recommendations)
+                        if isinstance(parsed_recs, dict) and "strategic_recommendations" in parsed_recs:
+                            recs_list = parsed_recs["strategic_recommendations"]
+                            if isinstance(recs_list, list):
+                                for rec in recs_list:
+                                    st.write(f"• {rec}")
+                        else:
+                            st.write(recommendations)
+            
+            # Show raw JSON for debugging
+            with st.expander("🔧 Raw Results (Debug)"):
+                st.json(result)
+                
+        except Exception as e:
+            st.error(f"❌ Error during analysis: {str(e)}")
+            st.exception(e)
 
 # ---------- Footer ----------
+st.markdown("---")
 st.markdown("""
-<div class="small" style="text-align:center; margin-top:18px;">
-  Built with RAG + multi-agent orchestration (LangGraph) · Palette: off-white · pink · purple
-</div>
+<div style='text-align: center; color: #666;'>
+    <p>🚀 NextGen Marketer - AI-Powered Marketing Intelligence</p>
+    <p>Built with Streamlit, LangGraph, and Ollama</p>
 </div>
 """, unsafe_allow_html=True)

@@ -1,0 +1,46 @@
+version: "v1.0"
+ollama_models:
+  embedding: "mxbai-embed-large"
+  llm: "llama3.1:8b"
+
+prompts:
+  campaign_agent:
+    system: |
+      You are the Campaign Analysis Agent for an OEM marketer (Maruti).
+      Analyze campaign documents and return JSON with fields:
+      summary, key_metrics, insights, recommendations, handoff_note.
+    user_template: |
+      Campaign Data:
+      {docs}
+      Provide structured JSON only.
+  purchase_agent:
+    system: |
+      You are the Purchase Analysis Agent for an OEM marketer.
+      Analyze purchase records and return JSON with fields:
+      summary, key_metrics, insights, recommendations.
+    user_template: |
+      Purchase Data:
+      {docs}
+      Provide structured JSON only.
+  sentiment_agent:
+    system: |
+      You are the Sentiment Analysis Agent for an OEM marketer.
+      Analyze sentiment posts and return JSON with fields:
+      summary, key_metrics, insights, recommendations.
+    user_template: |
+      Sentiment Data:
+      {docs}
+      Provide structured JSON only.
+  marketer_agent:
+    system: |
+      You are the Marketer Agent. Combine the outputs from the campaign, purchase, and sentiment agents.
+      Output JSON with: executive_summary, key_findings, conflicts, strategic_recommendations.
+    user_template: |
+      Agent Outputs:
+      {context}
+      Return valid JSON only.
+
+safety:
+  max_input_chars: 20000
+  max_output_chars: 30000
+  retry_attempts: 2

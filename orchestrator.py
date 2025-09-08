@@ -2,7 +2,10 @@
 from typing import TypedDict, List, Dict, Any
 from langgraph.graph import StateGraph, END
 
-from agents import sentiment_agent, purchase_agent, campaign_agent, marketer_agent
+from agents.sentiment_agent import SentimentAgent
+from agents.purchase_agent import PurchaseAgent
+from agents.campaign_agent import CampaignAgent
+from agents.marketer_agent import MarketerAgent
 
 # -------- State --------
 class AgentState(TypedDict, total=False):
@@ -26,19 +29,27 @@ def router_node(state: AgentState) -> Dict[str, Any]:
     return {"route": route}
 
 def sentiment_node(state: AgentState) -> Dict[str, Any]:
-    out = sentiment_agent.run(state["user_prompt"])
+    agent = SentimentAgent()
+    out = agent.analyze_sentiment(state["user_prompt"])
     return {"agent_outputs": (state.get("agent_outputs", []) + [out])}
 
 def purchase_node(state: AgentState) -> Dict[str, Any]:
-    out = purchase_agent.run(state["user_prompt"])
+    agent = PurchaseAgent()
+    out = agent.analyze_purchases(state["user_prompt"])
     return {"agent_outputs": (state.get("agent_outputs", []) + [out])}
 
 def campaign_node(state: AgentState) -> Dict[str, Any]:
-    out = campaign_agent.run(state["user_prompt"])
+    agent = CampaignAgent()
+    out = agent.analyze_campaigns(state["user_prompt"])
     return {"agent_outputs": (state.get("agent_outputs", []) + [out])}
 
 def marketer_node(state: AgentState) -> Dict[str, Any]:
-    decision = marketer_agent.run(state.get("agent_outputs", []), state["user_prompt"])
+    agent = MarketerAgent()
+    decision = agent.combine_insights(
+        state.get("agent_outputs", [{}])[0] if len(state.get("agent_outputs", [])) > 0 else {},
+        state.get("agent_outputs", [{}])[1] if len(state.get("agent_outputs", [])) > 1 else {},
+        state.get("agent_outputs", [{}])[2] if len(state.get("agent_outputs", [])) > 2 else {}
+    )
     return {"final_decision": decision}
 
 # -------- Build Graph --------

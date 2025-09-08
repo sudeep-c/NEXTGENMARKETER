@@ -29,7 +29,7 @@ Raw CSVs → Ingest (pandas → embeddings → ChromaDB) → Agents query their 
 
 * **Data Sources**: `data/sentiment_data.csv`, `data/purchase_data.csv`, `data/campaign_data.csv`
 * **Vector DB**: [Chroma](https://www.trychroma.com/)
-* **LLMs**: Local models via Ollama (`llama3.2:3b` for fast analysis, `llama3.1:8b` for creative synthesis)
+* **LLMs**: Local models via Ollama (`gpt-oss:20b` for analysis and synthesis, `nomic-embed-text` for embeddings)
 * **Orchestration**: [LangGraph](https://www.langchain.com/langgraph)
 * **Frontend**: [Streamlit](https://streamlit.io/) UI
 
@@ -68,8 +68,8 @@ pip install -r requirements.txt
 [Install Ollama](https://ollama.com/download), then:
 
 ```bash
-ollama pull llama3.2:3b   # Sentiment, Purchase, Campaign agents
-ollama pull llama3.1:8b   # Marketer agent
+ollama pull gpt-oss:20b        # All agents (Campaign, Purchase, Sentiment, Marketer)
+ollama pull nomic-embed-text   # Embeddings for RAG
 ```
 
 ### 3️⃣ Ingest sample data
@@ -155,3 +155,6 @@ Built by **SA Team(Aakash, Manoj, Roshan, Sudeep and Vinay)**
 ---
 
 👉 Would you like me to also generate a **diagram (PNG/SVG)** of your multi-agent architecture (cleaner than ASCII), so you can embed it in the README?
+
+
+## pip install fastapi uvicorn chromadb langchain pandas openai tiktoken

@@ -1,75 +1,77 @@
-# agents/marketer_agent.py
+from typing import Dict, Any
 import json
-from utils.llm_utils import ask_ollama
+import ollama
 
-MODEL = "llama3.1:8b"   # better synthesis/creativity; pull with: ollama pull llama3.1:8b
 
-def _normalize_channels(ch):
-    if isinstance(ch, list):
-        out = []
-        for item in ch:
-            if isinstance(item, str):
-                out.append(item)
-            elif isinstance(item, dict):
-                v = item.get("name") or item.get("channel") or item.get("type")
-                out.append(str(v) if v is not None else None)
-            else:
-                out.append(str(item))
-        return [c for c in out if c] or ["Email"]
-    if isinstance(ch, str):
-        return [ch] if ch else ["Email"]
-    return ["Email"]
+class MarketerAgent:
+    def __init__(self, ollama_model="gpt-oss:20b"):
+        self.ollama_model = ollama_model
 
-def run(agent_outputs, user_prompt: str):
-    # Keep payload compact for speed
-    try:
-        compact_outputs = []
-        for o in agent_outputs:
-            if isinstance(o, dict):
-                compact_outputs.append({
-                    "agent": o.get("agent"),
-                    "candidates": o.get("candidates", [])[:3],
-                    "score": o.get("score", 0.0),
-                    "rationale": (o.get("rationale") or "")[:200],
-                })
-            else:
-                compact_outputs.append({"agent": "unknown", "candidates": [], "score": 0.0, "rationale": str(o)[:200]})
-        insights = json.dumps(compact_outputs, ensure_ascii=False)
-    except Exception:
-        insights = str(agent_outputs)[:2000]
+    def combine_insights(
+        self,
+        campaign_output: Dict[str, Any],
+        purchase_output: Dict[str, Any],
+        sentiment_output: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Takes outputs from Campaign, Purchase, and Sentiment agents
+        and produces a unified marketing strategy recommendation.
+        """
+        system_prompt = """
+        You are the Marketer Agent. Your job is to combine insights from
+        Campaign, Purchase, and Sentiment Agents into one unified marketing strategy.
+        
+        Output structured JSON with:
+        - executive_summary (2–3 lines),
+        - key_findings (from campaigns, purchases, and sentiment),
+        - conflicts (where agents disagree or data is misaligned),
+        - strategic_recommendations (high-level actions for the marketing team).
+        
+        Only return valid JSON.
+        """
 
-    prompt = f"""
-You are a Creative Marketing Strategist AI.
+        context = {
+            "campaign_agent": campaign_output,
+            "purchase_agent": purchase_output,
+            "sentiment_agent": sentiment_output
+        }
 
-User question:
-"{user_prompt}"
+        prompt = f"{system_prompt}\n\nAgent Insights:\n{json.dumps(context, indent=2)}\n"
 
-Insights from specialist agents (JSON, compact):
-{insights}
+        response = ollama.chat(model=self.ollama_model, messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ])
 
-Task:
-- Generate ONE NEW campaign idea (new concept, not a past campaign).
-- Output STRICT JSON with EXACT keys:
-  {{
-    "campaign_name": "<string>",
-    "product": "<string>",
-    "region": "<string>",
-    "segment": "<string>",
-    "concept": "<string>",
-    "channels": ["Email","Push","SMS"],  // array of strings only
-    "content_brief": "<string>"
-  }}
-Keep it concise and actionable.
-"""
-    resp = ask_ollama(prompt, model=MODEL, json_mode=True)
+        try:
+            result = json.loads(response["message"]["content"])
+        except Exception:
+            # fallback if not JSON
+            result = {
+                "executive_summary": response["message"]["content"],
+                "key_findings": {},
+                "conflicts": [],
+                "strategic_recommendations": []
+            }
 
-    # Harden channels to list[str]
-    resp["channels"] = _normalize_channels(resp.get("channels", []))
-    # Add minimal defaults to avoid UI crashes
-    resp.setdefault("campaign_name", "New Campaign")
-    resp.setdefault("product", "—")
-    resp.setdefault("region", "—")
-    resp.setdefault("segment", "—")
-    resp.setdefault("concept", "—")
-    resp.setdefault("content_brief", "—")
-    return resp
+        return result
+
+
+if __name__ == "__main__":
+    # Example dummy agent outputs (in practice, import actual agent outputs here)
+    campaign_output = {
+        "summary": "SUV CTR declining; compact SUVs outperform luxury SUVs.",
+        "recommendations": ["Shift spend from TV to Social Media"]
+    }
+    purchase_output = {
+        "summary": "Compact SUVs lead sales; sedans declining.",
+        "recommendations": ["Focus campaigns on compact SUVs"]
+    }
+    sentiment_output = {
+        "summary": "Positive buzz around Brezza; complaints about service.",
+        "recommendations": ["Improve after-sales service messaging"]
+    }
+
+    agent = MarketerAgent()
+    output = agent.combine_insights(campaign_output, purchase_output, sentiment_output)
+    print(json.dumps(output, indent=2))
