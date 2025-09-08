@@ -1,6 +1,3 @@
-Perfect 👌 — here’s a polished **`README.md`** you can drop into your repo root. It’s hackathon-friendly (clear, visual, professional).
-
----
 
 # 📈 Next-Gen Marketer
 
