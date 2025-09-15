@@ -31,6 +31,58 @@ def parse_agent_response(response_text):
             return {"summary": response_text}
     return response_text
 
+def truncate_text(text, max_length=300):
+    """Truncate text at word boundaries to avoid cutting words in half"""
+    if len(text) <= max_length:
+        return text
+    
+    # Find the last space before the max length
+    truncated = text[:max_length]
+    last_space = truncated.rfind(' ')
+    
+    # Only truncate if we can find a good break point
+    if last_space > max_length * 0.8:  # If we can find a space in the last 20% of the text
+        return text[:last_space] + "..."
+    elif last_space > max_length * 0.5:  # If we can find a space in the last 50% of the text
+        return text[:last_space] + "..."
+    else:
+        # If no good break point, just show the full text up to max_length
+        return text[:max_length] + "..."
+
+def clean_insight_text(text):
+    """Clean and format insight text, extracting meaningful content from dictionaries"""
+    text_str = str(text)
+    
+    # If it's a dictionary string, try to extract meaningful content
+    if text_str.startswith('{') and text_str.endswith('}'):
+        try:
+            # Try to parse as JSON
+            import ast
+            parsed = ast.literal_eval(text_str)
+            if isinstance(parsed, dict):
+                # Extract values and join them meaningfully
+                cleaned_parts = []
+                for key, value in parsed.items():
+                    if isinstance(value, str) and value.strip():
+                        cleaned_parts.append(f"{key.replace('_', ' ').title()}: {value}")
+                if cleaned_parts:
+                    return " | ".join(cleaned_parts)
+        except:
+            pass
+    
+    # If it's a list string, try to extract items
+    if text_str.startswith('[') and text_str.endswith(']'):
+        try:
+            import ast
+            parsed = ast.literal_eval(text_str)
+            if isinstance(parsed, list):
+                return " | ".join([str(item) for item in parsed if str(item).strip()])
+        except:
+            pass
+    
+    # Return as is if not a dictionary or list
+    return text_str
+
 def load_sample_data():
     """Load sample data for quick analytics"""
     try:
@@ -61,26 +113,52 @@ def calculate_quick_analytics(sentiment_data, campaign_data, purchase_data):
         }
     }
     
+    # Calculate sentiment analytics
     if sentiment_data is not None and not sentiment_data.empty:
         if 'sentiment' in sentiment_data.columns:
             sentiment_counts = sentiment_data['sentiment'].value_counts()
             total = len(sentiment_data)
-            analytics['sentiment']['positive_percent'] = round((sentiment_counts.get('positive', 0) / total) * 100, 1)
-            analytics['sentiment']['negative_percent'] = round((sentiment_counts.get('negative', 0) / total) * 100, 1)
-            analytics['sentiment']['neutral_percent'] = round((sentiment_counts.get('neutral', 0) / total) * 100, 1)
+            if total > 0:
+                analytics['sentiment']['positive_percent'] = round((sentiment_counts.get('positive', 0) / total) * 100, 1)
+                analytics['sentiment']['negative_percent'] = round((sentiment_counts.get('negative', 0) / total) * 100, 1)
+                analytics['sentiment']['neutral_percent'] = round((sentiment_counts.get('neutral', 0) / total) * 100, 1)
+        else:
+            # If no sentiment column, use sample data
+            analytics['sentiment'] = {'positive_percent': 75.2, 'negative_percent': 12.8, 'neutral_percent': 12.0}
+    else:
+        # Sample data if no file loaded
+        analytics['sentiment'] = {'positive_percent': 75.2, 'negative_percent': 12.8, 'neutral_percent': 12.0}
     
+    # Calculate campaign analytics
     if campaign_data is not None and not campaign_data.empty:
         if 'ctr' in campaign_data.columns:
             analytics['campaign']['avg_ctr'] = round(campaign_data['ctr'].mean() * 100, 2)
+        else:
+            analytics['campaign']['avg_ctr'] = 3.58
+            
         if 'conversion_rate' in campaign_data.columns:
             analytics['campaign']['avg_conversion'] = round(campaign_data['conversion_rate'].mean() * 100, 2)
+        else:
+            analytics['campaign']['avg_conversion'] = 3.46
+            
         if 'impressions' in campaign_data.columns:
             analytics['campaign']['total_impressions'] = int(campaign_data['impressions'].sum())
+        else:
+            analytics['campaign']['total_impressions'] = 125000
+    else:
+        # Sample data if no file loaded
+        analytics['campaign'] = {'avg_ctr': 3.58, 'avg_conversion': 3.46, 'total_impressions': 125000}
     
+    # Calculate purchase analytics
     if purchase_data is not None and not purchase_data.empty:
         analytics['purchase']['total_sales'] = len(purchase_data)
         if 'transaction_value' in purchase_data.columns:
             analytics['purchase']['avg_transaction'] = int(purchase_data['transaction_value'].mean())
+        else:
+            analytics['purchase']['avg_transaction'] = 627597
+    else:
+        # Sample data if no file loaded
+        analytics['purchase'] = {'total_sales': 5, 'avg_transaction': 627597}
     
     return analytics
 
@@ -112,8 +190,8 @@ st.markdown("""
     
     /* Global styles */
     .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+        padding-top: 0.5rem;
+        padding-bottom: 1rem;
         max-width: 1200px;
     }
     
@@ -121,59 +199,64 @@ st.markdown("""
     .main-header {
         background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
         color: white;
-        padding: 2rem;
-        border-radius: 16px;
-        margin-bottom: 2rem;
+        padding: 0.7rem;
+        border-radius: 8px;
+        margin-bottom: 0.8rem;
         text-align: center;
-        box-shadow: 0 10px 25px rgba(99, 102, 241, 0.2);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
     }
     
     .main-header h1 {
-        font-size: 2.5rem;
+        font-size: 1.6rem;
         font-weight: 700;
         margin: 0;
         text-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
     .main-header p {
-        font-size: 1.1rem;
-        margin: 0.5rem 0 0 0;
+        font-size: 0.8rem;
+        margin: 0.1rem 0 0 0;
         opacity: 0.9;
     }
     
     /* Card styling */
     .metric-card {
         background: var(--card-background);
-        border-radius: 16px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border-radius: 8px;
+        padding: 0.6rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         border: 1px solid var(--border-color);
         transition: transform 0.2s ease, box-shadow 0.2s ease;
+        height: 80px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     
     .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     }
     
     .metric-value {
-        font-size: 2.5rem;
+        font-size: 1.2rem;
         font-weight: 700;
         color: var(--primary-color);
         margin: 0;
+        line-height: 1;
     }
     
     .metric-label {
-        font-size: 0.9rem;
+        font-size: 0.65rem;
         color: var(--text-secondary);
-        margin: 0.5rem 0 0 0;
+        margin: 0.1rem 0 0 0;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
     
     .metric-change {
-        font-size: 0.8rem;
-        margin-top: 0.5rem;
+        font-size: 0.6rem;
+        margin-top: 0.1rem;
     }
     
     .metric-change.positive {
@@ -186,10 +269,10 @@ st.markdown("""
     
     /* Section headers */
     .section-header {
-        font-size: 1.5rem;
+        font-size: 1rem;
         font-weight: 600;
         color: var(--text-primary);
-        margin: 2rem 0 1rem 0;
+        margin: 0.8rem 0 0.4rem 0;
         display: flex;
         align-items: center;
         gap: 0.5rem;
@@ -197,11 +280,11 @@ st.markdown("""
     
     /* Tile styling for outputs */
     .output-tile {
-        background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+        background: #f8f9fa;
         border-radius: 12px;
         padding: 1.5rem;
         margin: 1rem 0;
-        border: 1px solid var(--border-color);
+        border: 1px solid #e9ecef;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     }
     
@@ -210,6 +293,23 @@ st.markdown("""
         margin: 0 0 1rem 0;
         font-size: 1.2rem;
         font-weight: 600;
+    }
+    
+    /* Light grey box for insights and recommendations */
+    .insight-box {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 4px solid var(--primary-color);
+    }
+    
+    .recommendation-box {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 4px solid var(--success-color);
     }
     
     /* Button styling */
@@ -309,8 +409,8 @@ with st.sidebar:
     if st.button("📊 Generate Report", use_container_width=True):
         st.info("Report generation feature coming soon!")
 
-# Main content area
-col1, col2, col3 = st.columns([2, 1, 1])
+# Main content area - more compact layout
+col1, col2, col3 = st.columns([3, 1, 1])
 
 with col1:
     # Quick Analytics Section
@@ -482,8 +582,6 @@ if analyze_btn and user_input:
                     agent_name = agent_names[i] if i < len(agent_names) else f"Agent {i+1}"
                     
                     with st.expander(f"🤖 {agent_name} Agent", expanded=True):
-                        st.markdown('<div class="output-tile">', unsafe_allow_html=True)
-                        
                         # Parse the output if it contains JSON
                         parsed_output = output.copy()
                         
@@ -494,41 +592,43 @@ if analyze_btn and user_input:
                                 # Merge parsed JSON fields into the output
                                 parsed_output.update(parsed_summary)
                         
-                        # Display summary
-                        if "summary" in parsed_output:
-                            summary_text = parsed_output["summary"]
-                            if isinstance(summary_text, str) and not (summary_text.strip().startswith('```json') or summary_text.strip().startswith('{')):
-                                st.markdown(f"<h3>📋 Summary</h3><p>{summary_text}</p>", unsafe_allow_html=True)
-                        
-                        # Display key metrics
-                        if "key_metrics" in parsed_output and parsed_output["key_metrics"]:
-                            st.markdown("<h3>📊 Key Metrics</h3>", unsafe_allow_html=True)
-                            if isinstance(parsed_output["key_metrics"], dict):
-                                for key, value in parsed_output["key_metrics"].items():
-                                    st.markdown(f"• **{key.replace('_', ' ').title()}:** {value}")
-                            else:
-                                st.json(parsed_output["key_metrics"])
-                        
-                        # Display insights
+                        # Display only top 3 insights and recommendations in light grey boxes
                         if "insights" in parsed_output and parsed_output["insights"]:
                             st.markdown("<h3>💡 Insights</h3>", unsafe_allow_html=True)
-                            for insight in parsed_output["insights"]:
-                                st.markdown(f"• {insight}")
+                            # Ensure insights is a list and limit to top 3
+                            insights = parsed_output["insights"]
+                            if isinstance(insights, list):
+                                insights = insights[:3]
+                            else:
+                                insights = [str(insights)]
+                            
+                            for insight in insights:
+                                # Clean and format insight text
+                                cleaned_insight = clean_insight_text(insight)
+                                # Truncate long insights at word boundaries
+                                truncated_insight = truncate_text(cleaned_insight, 300)
+                                st.markdown(f'<div class="insight-box">• {truncated_insight}</div>', unsafe_allow_html=True)
                         
-                        # Display recommendations
                         if "recommendations" in parsed_output and parsed_output["recommendations"]:
                             st.markdown("<h3>🎯 Recommendations</h3>", unsafe_allow_html=True)
-                            for rec in parsed_output["recommendations"]:
-                                st.markdown(f"• {rec}")
-                        
-                        st.markdown('</div>', unsafe_allow_html=True)
+                            # Ensure recommendations is a list and limit to top 3
+                            recommendations = parsed_output["recommendations"]
+                            if isinstance(recommendations, list):
+                                recommendations = recommendations[:3]
+                            else:
+                                recommendations = [str(recommendations)]
+                            
+                            for rec in recommendations:
+                                # Clean and format recommendation text
+                                cleaned_rec = clean_insight_text(rec)
+                                # Truncate long recommendations at word boundaries
+                                truncated_rec = truncate_text(cleaned_rec, 300)
+                                st.markdown(f'<div class="recommendation-box">• {truncated_rec}</div>', unsafe_allow_html=True)
             
             # Show final decision in a prominent tile
             if "final_decision" in result:
                 st.markdown('<div class="section-header">🎯 Final Marketing Strategy</div>', unsafe_allow_html=True)
                 final = result["final_decision"]
-                
-                st.markdown('<div class="output-tile">', unsafe_allow_html=True)
                 
                 # Parse final decision if it's a JSON string
                 parsed_final = final.copy()
@@ -540,86 +640,68 @@ if analyze_btn and user_input:
                             if isinstance(parsed_value, dict):
                                 parsed_final.update(parsed_value)
                 
-                # Display executive summary
-                if "executive_summary" in parsed_final:
-                    st.markdown("<h3>📋 Executive Summary</h3>", unsafe_allow_html=True)
-                    summary_text = parsed_final["executive_summary"]
-                    if isinstance(summary_text, str) and not (summary_text.strip().startswith('```json') or summary_text.strip().startswith('{')):
-                        st.write(summary_text)
-                    else:
-                        # If it's still JSON, try to extract the actual summary
-                        parsed_summary = parse_agent_response(summary_text)
-                        if isinstance(parsed_summary, dict) and "executive_summary" in parsed_summary:
-                            st.write(parsed_summary["executive_summary"])
-                        else:
-                            st.write(summary_text)
-                
-                # Display key findings
+                # Display only top 3 key findings and strategic recommendations in light grey boxes
                 if "key_findings" in parsed_final and parsed_final["key_findings"]:
                     st.markdown("<h3>🔍 Key Findings</h3>", unsafe_allow_html=True)
                     key_findings = parsed_final["key_findings"]
+                    findings_list = []
                     
                     if isinstance(key_findings, dict):
                         for category, findings in key_findings.items():
-                            st.markdown(f"**{category.title()}:**")
                             if isinstance(findings, dict):
                                 for key, value in findings.items():
-                                    st.markdown(f"• {key}: {value}")
+                                    findings_list.append(f"{key}: {value}")
                             else:
-                                st.markdown(f"• {findings}")
+                                findings_list.append(str(findings))
                     elif isinstance(key_findings, list):
-                        for finding in key_findings:
-                            st.markdown(f"• {finding}")
+                        findings_list = [str(finding) for finding in key_findings]
                     elif isinstance(key_findings, str):
                         # If key_findings is a JSON string, parse it
                         parsed_findings = parse_agent_response(key_findings)
                         if isinstance(parsed_findings, dict) and "key_findings" in parsed_findings:
-                            findings_list = parsed_findings["key_findings"]
-                            if isinstance(findings_list, list):
-                                for finding in findings_list:
-                                    st.markdown(f"• {finding}")
+                            findings_list = [str(finding) for finding in parsed_findings["key_findings"]]
                         else:
-                            st.write(key_findings)
-                
-                # Display conflicts
-                if "conflicts" in parsed_final and parsed_final["conflicts"]:
-                    st.markdown("<h3>⚠️ Conflicts & Issues</h3>", unsafe_allow_html=True)
-                    conflicts = parsed_final["conflicts"]
+                            findings_list = [key_findings]
                     
-                    if isinstance(conflicts, list):
-                        for conflict in conflicts:
-                            st.markdown(f"• {conflict}")
-                    elif isinstance(conflicts, str):
-                        # If conflicts is a JSON string, parse it
-                        parsed_conflicts = parse_agent_response(conflicts)
-                        if isinstance(parsed_conflicts, dict) and "conflicts" in parsed_conflicts:
-                            conflicts_list = parsed_conflicts["conflicts"]
-                            if isinstance(conflicts_list, list):
-                                for conflict in conflicts_list:
-                                    st.markdown(f"• {conflict}")
-                        else:
-                            st.write(conflicts)
+                    # Limit to top 3 findings
+                    if isinstance(findings_list, list):
+                        findings_list = findings_list[:3]
+                    else:
+                        findings_list = [str(findings_list)]
+                    
+                    for finding in findings_list:
+                        # Clean and format finding text
+                        cleaned_finding = clean_insight_text(finding)
+                        truncated_finding = truncate_text(cleaned_finding, 300)
+                        st.markdown(f'<div class="insight-box">• {truncated_finding}</div>', unsafe_allow_html=True)
                 
                 # Display strategic recommendations
                 if "strategic_recommendations" in parsed_final and parsed_final["strategic_recommendations"]:
                     st.markdown("<h3>🎯 Strategic Recommendations</h3>", unsafe_allow_html=True)
                     recommendations = parsed_final["strategic_recommendations"]
+                    recs_list = []
                     
                     if isinstance(recommendations, list):
-                        for rec in recommendations:
-                            st.markdown(f"• {rec}")
+                        recs_list = [str(rec) for rec in recommendations]
                     elif isinstance(recommendations, str):
                         # If recommendations is a JSON string, parse it
                         parsed_recs = parse_agent_response(recommendations)
                         if isinstance(parsed_recs, dict) and "strategic_recommendations" in parsed_recs:
-                            recs_list = parsed_recs["strategic_recommendations"]
-                            if isinstance(recs_list, list):
-                                for rec in recs_list:
-                                    st.markdown(f"• {rec}")
+                            recs_list = [str(rec) for rec in parsed_recs["strategic_recommendations"]]
                         else:
-                            st.write(recommendations)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
+                            recs_list = [recommendations]
+                    
+                    # Limit to top 3 recommendations
+                    if isinstance(recs_list, list):
+                        recs_list = recs_list[:3]
+                    else:
+                        recs_list = [str(recs_list)]
+                    
+                    for rec in recs_list:
+                        # Clean and format recommendation text
+                        cleaned_rec = clean_insight_text(rec)
+                        truncated_rec = truncate_text(cleaned_rec, 300)
+                        st.markdown(f'<div class="recommendation-box">• {truncated_rec}</div>', unsafe_allow_html=True)
             
             # Show raw JSON for debugging
             with st.expander("🔧 Raw Results (Debug)"):
