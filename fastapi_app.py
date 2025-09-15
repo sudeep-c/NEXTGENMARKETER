@@ -13,7 +13,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from starlette.middleware.cors import CORSMiddleware
 from jsonschema import validate, ValidationError
 
-from multi_agent_workflow import build_workflow
+from orchestrator import build_graph
 
 # load config
 CFG_PATH = os.environ.get("MG_CONFIG", "./configs/prompts.yaml")
@@ -27,7 +27,7 @@ REQ_COUNTER = Counter("api_requests_total", "Total API requests", ["endpoint", "
 REQ_LATENCY = Histogram("api_request_latency_seconds", "Request latency seconds", ["endpoint"])
 
 # JSON schema
-from json_schema import FINAL_STRATEGY_SCHEMA
+from utils.json_schema import FINAL_STRATEGY_SCHEMA
 
 # simple banned phrases
 BANNED = ["do illegal", "hack", "kill", "terror"]
@@ -37,7 +37,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 # build workflow
 try:
-    workflow_app = build_workflow().compile()
+    workflow_app = build_graph()
 except Exception as e:
     logger.exception("Failed to build workflow: %s", e)
     workflow_app = None
@@ -102,11 +102,11 @@ async def strategy(req: StrategyRequest):
         raise HTTPException(status_code=500, detail="workflow not available")
     # invoke LangGraph compiled app
     try:
-        final_state = workflow_app.invoke({"user_query": req.query})
+        final_state = workflow_app.invoke({"user_prompt": req.query})
     except Exception as e:
         logger.exception("Workflow invoke failed")
         raise HTTPException(status_code=500, detail=str(e))
-    final_strategy = final_state.get("final_strategy")
+    final_strategy = final_state.get("final_decision")
     # validation / deterministic enforcement
     valid = True
     schema_err = None
