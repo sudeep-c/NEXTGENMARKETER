@@ -1,11 +1,120 @@
-from typing import Dict, Any
+# marketer_agent.py
+from typing import Dict, Any, List
 import json
 import ollama
+from utils.llm_utils import ask_ollama
 
 
 class MarketerAgent:
-    def __init__(self, ollama_model="gpt-oss:20b"):
+    def __init__(self, ollama_model: str = "mistral:7b"):
         self.ollama_model = ollama_model
+
+    def _ensure_list_of_str(self, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return [str(v)]
+
+    def _safe_float(self, v, default=0.0):
+        try:
+            return float(v)
+        except Exception:
+            return default
+
+    def _normalize_key_findings(self, maybe_kf: Dict[str, Any], sources_present: List[str]):
+        """Return a key_findings dict with sensible defaults for missing agents."""
+        norm = {}
+        # expected keys: sentiment, purchase, campaign
+        for k in ("sentiment", "purchase", "campaign"):
+            val = maybe_kf.get(k) if isinstance(maybe_kf, dict) else None
+            if val:
+                # If it's a string or list, keep as-list of strings
+                if isinstance(val, list):
+                    norm[k] = [str(x) for x in val]
+                elif isinstance(val, dict):
+                    # flatten small dict -> list of "k: v"
+                    parts = []
+                    for kk, vv in val.items():
+                        parts.append(f"{kk}: {vv}")
+                    norm[k] = parts
+                else:
+                    norm[k] = [str(val)]
+            else:
+                # mark as not available if agent was not run
+                if k.capitalize() in sources_present:
+                    norm[k] = ["No key findings produced by agent"]
+                else:
+                    norm[k] = [f"No data available (agent not run)"]
+        return norm
+
+    def _ensure_final_campaign_shape(self, raw: Dict[str, Any], sources_present: List[str], campaign_refs: Dict[str, Any]):
+        """Guarantee final_campaign has the required keys and safe defaults."""
+        # required structure
+        keys = [
+            "campaign_name",
+            "product",
+            "region",
+            "audience_segment",
+            "concept",
+            "channels",        # list[str]
+            "content_brief",
+            "kpis",            # list[str]
+            "rationale"
+        ]
+
+        fc = raw.get("final_campaign") if isinstance(raw, dict) else None
+        if not isinstance(fc, dict):
+            fc = {}
+
+        # Helper: try to pick a product from campaign_refs (purchase -> product_focus, sentiment -> most mentioned models, campaign -> product)
+        def pick_product():
+            if campaign_refs.get("purchase"):
+                p = campaign_refs["purchase"].get("product_focus") or campaign_refs["purchase"].get("product") or campaign_refs["purchase"].get("top_products")
+                if isinstance(p, list) and p:
+                    return ", ".join([str(x) for x in p])
+                if p:
+                    return str(p)
+            if campaign_refs.get("sentiment"):
+                mm = campaign_refs["sentiment"].get("most_mentioned_models") or campaign_refs["sentiment"].get("most_mentioned") or campaign_refs["sentiment"].get("top_models")
+                if isinstance(mm, list) and mm:
+                    return ", ".join([str(x) for x in mm])
+                if mm:
+                    return str(mm)
+            if campaign_refs.get("campaign"):
+                name = campaign_refs["campaign"].get("product") or campaign_refs["campaign"].get("products") or campaign_refs["campaign"].get("top_products")
+                if isinstance(name, list) and name:
+                    return ", ".join([str(x) for x in name])
+                if name:
+                    return str(name)
+            return ""
+
+        defaults = {
+            "campaign_name": fc.get("campaign_name") or fc.get("name") or "New Campaign Idea",
+            "product": fc.get("product") or pick_product() or "Generic Product",
+            "region": fc.get("region") or fc.get("geo") or "National",
+            "audience_segment": fc.get("audience_segment") or fc.get("segment") or "General Audience",
+            "concept": fc.get("concept") or fc.get("idea") or "Short concise campaign concept generated from agent outputs",
+            "channels": self._ensure_list_of_str(fc.get("channels")) or ["Email", "Push", "SMS"],
+            "content_brief": fc.get("content_brief") or fc.get("brief") or "Short content brief describing main messaging and CTAs.",
+            "kpis": self._ensure_list_of_str(fc.get("kpis")) or ["CTR", "Conversion Rate"],
+            "rationale": fc.get("rationale") or fc.get("why") or "Derived from provided specialist agent outputs."
+        }
+
+        # Clean channel values to be strings and limited to known channels where possible
+        cleaned_channels = []
+        for ch in defaults["channels"]:
+            chs = str(ch).strip()
+            if chs:
+                cleaned_channels.append(chs)
+        if not cleaned_channels:
+            cleaned_channels = ["Email", "Push", "SMS"]
+        defaults["channels"] = cleaned_channels
+
+        # Ensure kpis are strings
+        defaults["kpis"] = [str(x) for x in defaults["kpis"]]
+
+        return defaults
 
     def combine_insights(
         self,
@@ -16,138 +125,168 @@ class MarketerAgent:
         """
         Takes outputs from Campaign, Purchase, and Sentiment agents
         and produces a unified marketing strategy recommendation.
-        """
-        system_prompt = """
-        You are the Marketer Agent. Your job is to combine insights from
-        Campaign, Purchase, and Sentiment Agents into one unified marketing strategy.
-        
-        Output structured JSON with:
-        - executive_summary (2–3 lines),
-        - key_findings (from campaigns, purchases, and sentiment),
-        - conflicts (where agents disagree or data is misaligned),
-        - strategic_recommendations (high-level actions for the marketing team).
-        
-        Only return valid JSON.
+
+        Guarantees:
+        - final returned dict contains 'executive_summary', 'key_findings', 'final_campaign',
+          and 'source_agents' keys.
+        - 'final_campaign' follows a strict shape with safe defaults.
+        - Marketer will NOT hallucinate unrelated products or industries (system prompt enforces).
         """
 
-        # Extract meaningful content from agent outputs
-        def extract_summary(output):
-            if isinstance(output, dict):
-                return output.get("summary", "No data available")
-            return str(output) if output else "No data available"
-        
-        def extract_insights(output):
-            if isinstance(output, dict):
-                insights = output.get("insights", [])
+        # Build a compact context used for the prompt and also to attempt to extract
+        # fields if the LLM response is incomplete.
+        def extract_summary(out):
+            if isinstance(out, dict):
+                return out.get("summary", "")
+            return str(out) if out else ""
+
+        def extract_key_insights(out):
+            if isinstance(out, dict):
+                insights = out.get("insights", [])
+                # keep as list of dicts or strings
                 if isinstance(insights, list):
-                    return [str(item) for item in insights if item]
-                return [str(insights)] if insights else []
+                    return insights
+                if isinstance(insights, dict):
+                    return [insights]
+                if insights:
+                    return [insights]
             return []
-        
-        def extract_recommendations(output):
-            if isinstance(output, dict):
-                recs = output.get("recommendations", [])
-                if isinstance(recs, list):
-                    return [str(item) for item in recs if item]
-                return [str(recs)] if recs else []
-            return []
-        
+
         campaign_summary = extract_summary(campaign_output)
         purchase_summary = extract_summary(purchase_output)
         sentiment_summary = extract_summary(sentiment_output)
-        
-        campaign_insights = extract_insights(campaign_output)
-        purchase_insights = extract_insights(purchase_output)
-        sentiment_insights = extract_insights(sentiment_output)
-        
-        campaign_recs = extract_recommendations(campaign_output)
-        purchase_recs = extract_recommendations(purchase_output)
-        sentiment_recs = extract_recommendations(sentiment_output)
-        
-        # Convert any dictionaries to strings
-        def safe_join(items):
-            if not items:
-                return 'None'
-            safe_items = []
-            for item in items:
-                if isinstance(item, dict):
-                    safe_items.append(str(item))
-                else:
-                    safe_items.append(str(item))
-            return ', '.join(safe_items)
 
-        context = f"""
-Campaign Agent Summary: {campaign_summary}
-Campaign Insights: {safe_join(campaign_insights)}
-Campaign Recommendations: {safe_join(campaign_recs)}
+        # Collect small reference blob for fallback extraction
+        campaign_refs = {
+            "campaign": campaign_output or {},
+            "purchase": purchase_output or {},
+            "sentiment": sentiment_output or {},
+        }
 
-Purchase Agent Summary: {purchase_summary}
-Purchase Insights: {safe_join(purchase_insights)}
-Purchase Recommendations: {safe_join(purchase_recs)}
+        # Track which agents produced outputs
+        sources = []
+        if campaign_output:
+            sources.append("Campaign")
+        if purchase_output:
+            sources.append("Purchase")
+        if sentiment_output:
+            sources.append("Sentiment")
 
-Sentiment Agent Summary: {sentiment_summary}
-Sentiment Insights: {safe_join(sentiment_insights)}
-Sentiment Recommendations: {safe_join(sentiment_recs)}
+        # System prompt — tightened to avoid hallucinations and force strict JSON
+        system_prompt = """
+You are Marketer Agent — a strict, conservative marketing strategist assistant.
+You MUST only use the information present in the provided "Agent Insights" section below.
+Do NOT invent facts, products, regions, or metrics that are not present in the provided agent outputs.
+If an agent's output is missing, explicitly mark its findings as "No data available (agent not run)".
+Your primary task is to produce ONE concise new campaign idea (not copy-paste of existing campaigns),
+and a short executive summary + structured key findings. The final output MUST be valid JSON.
+
+Output JSON MUST contain these top-level keys:
+- executive_summary (string)
+- key_findings (object with keys 'sentiment', 'purchase', 'campaign' each containing a list of strings)
+- final_campaign (object with exact keys: campaign_name, product, region, audience_segment, concept, channels, content_brief, kpis, rationale)
+- source_agents (list of strings)
+
+Do not add additional top-level keys beyond these (you may include 'conflicts' if necessary).
+Keep the executive_summary <= 5 sentences and keep campaign fields concise.
+If you cannot produce a confident answer, still return valid JSON, and set sensible defaults.
 """
 
-        prompt = f"{system_prompt}\n\nAgent Insights:\n{context}\n"
+        # Compose the agent insights compactly (JSON) to feed to LLM
+        insights_blob = {
+            "campaign_summary": campaign_summary,
+            "purchase_summary": purchase_summary,
+            "sentiment_summary": sentiment_summary,
+            "campaign_insights": campaign_output.get("insights") if isinstance(campaign_output, dict) else None,
+            "purchase_insights": purchase_output.get("insights") if isinstance(purchase_output, dict) else None,
+            "sentiment_insights": sentiment_output.get("insights") if isinstance(sentiment_output, dict) else None,
+        }
 
-        response = ollama.chat(model=self.ollama_model, messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ])
+        prompt = f"""
+{system_prompt}
 
-        try:
-            result = json.loads(response["message"]["content"])
-            # Ensure all required fields exist
-            if "key_findings" not in result:
-                result["key_findings"] = {
-                    "campaign_insights": campaign_summary,
-                    "purchase_insights": purchase_summary,
-                    "sentiment_insights": sentiment_summary
+Agent Insights (JSON):
+{json.dumps(insights_blob, default=str, indent=2)}
+
+Task:
+- Using ONLY the Agent Insights above, generate the required JSON structure.
+- Produce ONE NEW campaign idea (new concept).
+- Keep the executive summary concise and do not hallucinate.
+"""
+
+        # Ask the LLM via helper
+        resp = ask_ollama(prompt, model=self.ollama_model, json_mode=True)
+
+        # If response is already a dict, use it; else attempt to parse JSON; else fallback to structured content
+        result: Dict[str, Any]
+        if isinstance(resp, dict):
+            result = resp
+        else:
+            # try to parse JSON string
+            try:
+                result = json.loads(str(resp))
+            except Exception:
+                # fallback: produce a structured result using compact synthesis
+                exec_sum = (
+                    campaign_summary or purchase_summary or sentiment_summary or
+                    "No substantive agent outputs available."
+                )
+                result = {
+                    "executive_summary": exec_sum[:500],
+                    "key_findings": {},
+                    "final_campaign": {},
+                    "source_agents": sources,
                 }
-            if "strategic_recommendations" not in result:
-                result["strategic_recommendations"] = [
-                    "Review individual agent outputs for detailed insights",
-                    "Consider cross-agent data alignment",
-                    "Implement targeted improvements based on agent recommendations"
-                ]
-        except Exception:
-            # fallback if not JSON - create structured content from raw response
-            raw_content = response["message"]["content"]
-            result = {
-                "executive_summary": raw_content[:200] + "..." if len(raw_content) > 200 else raw_content,
-                "key_findings": {
-                    "campaign_insights": campaign_summary,
-                    "purchase_insights": purchase_summary,
-                    "sentiment_insights": sentiment_summary
-                },
-                "conflicts": ["Data integration requires manual review"],
-                "strategic_recommendations": [
-                    "Review individual agent outputs for detailed insights",
-                    "Consider cross-agent data alignment",
-                    "Implement targeted improvements based on agent recommendations"
-                ]
-            }
+
+        # normalize key_findings
+        maybe_kf = result.get("key_findings", {})
+        normalized_kf = self._normalize_key_findings(maybe_kf, sources)
+        result["key_findings"] = normalized_kf
+
+        # ensure executive summary exists and is concise
+        exec_summary = result.get("executive_summary") or ""
+        if not exec_summary:
+            # create short executive summary from available summaries
+            pieces = []
+            if sentiment_summary:
+                pieces.append(sentiment_summary)
+            if purchase_summary:
+                pieces.append(purchase_summary)
+            if campaign_summary:
+                pieces.append(campaign_summary)
+            exec_summary = " ".join(pieces)[:800] if pieces else "No executive summary available."
+        result["executive_summary"] = exec_summary.strip()
+
+        # ensure source_agents present
+        if "source_agents" not in result or not isinstance(result["source_agents"], list):
+            result["source_agents"] = sources
+
+        # ensure final_campaign shape
+        final_campaign = self._ensure_final_campaign_shape(result, sources, campaign_refs)
+        result["final_campaign"] = final_campaign
+
+        # final safety: ensure keys exist
+        for k in ("executive_summary", "key_findings", "final_campaign", "source_agents"):
+            if k not in result:
+                result[k] = {} if k == "key_findings" else ([] if k == "source_agents" else "")
 
         return result
 
 
 if __name__ == "__main__":
-    # Example dummy agent outputs (in practice, import actual agent outputs here)
+    # Quick local test
     campaign_output = {
-        "summary": "SUV CTR declining; compact SUVs outperform luxury SUVs.",
-        "recommendations": ["Shift spend from TV to Social Media"]
+        "summary": "Campaign performance mixed; email works best",
+        "insights": [{"audience_segment": "Tech-savvy", "product_focus": "Alpha", "confidence": 0.8}],
     }
     purchase_output = {
-        "summary": "Compact SUVs lead sales; sedans declining.",
-        "recommendations": ["Focus campaigns on compact SUVs"]
+        "summary": "Purchases concentrated in South region for Alpha",
+        "insights": [{"audience_segment": "Families", "product_focus": "Alpha", "confidence": 0.75}],
     }
     sentiment_output = {
-        "summary": "Positive buzz around Brezza; complaints about service.",
-        "recommendations": ["Improve after-sales service messaging"]
+        "summary": "Mostly positive mentions for Alpha among urban users",
+        "insights": [{"audience_segment": "Urban", "product_focus": "Alpha", "confidence": 0.9}],
     }
-
     agent = MarketerAgent()
-    output = agent.combine_insights(campaign_output, purchase_output, sentiment_output)
-    print(json.dumps(output, indent=2))
+    out = agent.combine_insights(campaign_output, purchase_output, sentiment_output)
+    print(json.dumps(out, indent=2))

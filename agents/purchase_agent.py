@@ -1,63 +1,87 @@
+# purchase_agent.py
 from typing import Dict, Any
 import json
-import chromadb
-import ollama
+from utils.llm_utils import ask_ollama
+
 
 class PurchaseAgent:
-    def __init__(self, chroma_dir="./chroma_db", ollama_model="gpt-oss:20b", top_k=10):
-        # Connect to ChromaDB
-        self.client = chromadb.PersistentClient(path=chroma_dir)
-        self.collection = self.client.get_collection("purchases_maruti")
+    def __init__(self, ollama_model="mistral:7b"):
         self.ollama_model = ollama_model
-        self.top_k = top_k
 
-    def retrieve_purchase_data(self, query: str) -> str:
+    def analyze_purchases(self, user_prompt: str) -> Dict[str, Any]:
         """
-        Retrieves top_k purchase docs from Chroma relevant to query.
+        Analyze purchase-related queries and return structured insights.
+        Output is normalized to include both insights and campaign-style recommendations.
         """
-        emb = ollama.embeddings(model="nomic-embed-text", prompt=query).embedding
-        results = self.collection.query(query_embeddings=[emb], n_results=self.top_k)
-        docs = results["documents"][0] if results and "documents" in results else []
-        return "\n\n".join(docs)
-
-    def analyze_purchases(self, query: str = "Analyze Maruti purchase data") -> Dict[str, Any]:
-        """
-        Calls Ollama to analyze purchase data and return structured insights.
-        """
-        purchase_docs = self.retrieve_purchase_data(query)
-
         system_prompt = """
-        You are the Purchase Analysis Agent for Maruti vehicles.
-        Analyze purchase records and return JSON with:
-        - summary (1–2 lines),
-        - key_metrics (top models, avg transaction value, popular payment methods, regions with highest sales),
-        - insights (demand shifts, underperforming models, seasonal effects, dealer patterns),
-        - recommendations (actionable sales/marketing steps).
-        
-        Only return valid JSON.
+        You are the Purchase Agent. Your job is to analyze purchase data
+        (transactions, payment methods, regions, products).
+
+        Return STRICT JSON with this structure:
+        {
+          "summary": "<short overview>",
+          "key_metrics": {},   // optional key metrics, can be empty
+          "insights": [
+            {
+              "audience_segment": "<string>",
+              "product_focus": "<string>",
+              "region": "<string>",
+              "signal": "<string>",
+              "confidence": <float>
+            }
+          ],
+          "recommendations": [
+            {
+              "idea": "<campaign-style recommendation derived from purchase signals>",
+              "confidence": <float>
+            }
+          ]
+        }
+
+        Rules:
+        - Insights = audience/product/region-level patterns from purchases
+        - Recommendations = campaign-style ideas derived from purchase signals
+        - Confidence between 0.0–1.0
+        - Be concise and actionable
         """
 
-        prompt = f"{system_prompt}\n\nPurchase Data:\n{purchase_docs}\n"
+        # Call LLM
+        resp = ask_ollama(
+            f"{system_prompt}\n\nUser question:\n{user_prompt}",
+            model=self.ollama_model,
+            json_mode=True
+        )
 
-        response = ollama.chat(model=self.ollama_model, messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ])
-
-        try:
-            result = json.loads(response["message"]["content"])
-        except Exception:
-            result = {
-                "summary": response["message"]["content"],
+        # Normalize output
+        if not isinstance(resp, dict):
+            return {
+                "summary": str(resp),
                 "key_metrics": {},
                 "insights": [],
                 "recommendations": []
             }
+
+        result = {
+            "summary": resp.get("summary", "No summary available"),
+            "key_metrics": resp.get("key_metrics", {}),
+            "insights": resp.get("insights", []),
+            "recommendations": resp.get("recommendations", [])
+        }
+
+        # Ensure recommendations are campaign-style (fallback if empty)
+        if not result["recommendations"] and result["insights"]:
+            result["recommendations"] = [
+                {
+                    "idea": f"Target {ins.get('audience_segment', 'customers')} with a campaign highlighting {ins.get('product_focus', 'products')}",
+                    "confidence": ins.get("confidence", 0.6)
+                }
+                for ins in result["insights"][:2]
+            ]
 
         return result
 
 
 if __name__ == "__main__":
     agent = PurchaseAgent()
-    output = agent.analyze_purchases()
+    output = agent.analyze_purchases("Analyze Ertiga purchase patterns across states")
     print(json.dumps(output, indent=2))

@@ -4,7 +4,7 @@ import time
 import json
 import logging
 import subprocess
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -13,7 +13,13 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from starlette.middleware.cors import CORSMiddleware
 from jsonschema import validate, ValidationError
 
-from orchestrator import build_graph
+# import orchestrator build function defensively so module import doesn't crash the whole app
+try:
+    from orchestrator import build_graph
+except Exception as e:
+    # log the import failure and allow the rest of the app to start.
+    logging.exception("Could not import orchestrator.build_graph at module import: %s", e)
+    build_graph = None
 
 # load config
 CFG_PATH = os.environ.get("MG_CONFIG", "./configs/prompts.yaml")
@@ -61,6 +67,7 @@ def run_ingest_subproc(campaign, purchase, sentiment, pdf, persist_dir, batch_si
 
 class StrategyRequest(BaseModel):
     query: str
+    thread_id: Optional[str] = None
 
 @app.get("/health")
 async def health():
@@ -100,12 +107,50 @@ async def strategy(req: StrategyRequest):
         raise HTTPException(status_code=400, detail=reason)
     if workflow_app is None:
         raise HTTPException(status_code=500, detail="workflow not available")
-    # invoke LangGraph compiled app
+
+    final_state = None
+    thread_id = None
+
+    # Try to use langgraph_integration manager if available (preferred)
     try:
-        final_state = workflow_app.invoke({"user_prompt": req.query})
-    except Exception as e:
-        logger.exception("Workflow invoke failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        from langgraph_integration import manager as graph_manager
+        try:
+            final_state = graph_manager.invoke(req.thread_id, req.query)
+            thread_id = final_state.get("_thread_id") if isinstance(final_state, dict) else req.thread_id
+        except Exception as e:
+            logger.exception("langgraph_integration.manager.invoke failed, falling back to compiled workflow_app: %s", e)
+            final_state = None
+    except Exception:
+        # langgraph_integration not present — fall back immediately
+        final_state = None
+
+    # Fallback to existing compiled workflow invocation if langgraph path didn't produce a result
+    if final_state is None:
+        try:
+            # Pass thread_id inside payload so orchestrator nodes can access it if they want
+            payload = {"user_prompt": req.query, "thread_id": req.thread_id}
+
+            # --- Minimal change: supply LangGraph checkpointer `config` with thread_id ---
+            config = {"configurable": {"thread_id": req.thread_id}}
+            try:
+                final_state = workflow_app.invoke(payload, config=config)
+            except TypeError:
+                # compiled graph might not accept config param; try legacy signature
+                final_state = workflow_app.invoke(payload)
+
+            # If the graph returns a thread id inside state, capture it; else prefer request thread_id
+            if isinstance(final_state, dict) and "_thread_id" in final_state:
+                thread_id = final_state.get("_thread_id")
+            else:
+                thread_id = req.thread_id
+        except Exception as e:
+            logger.exception("Workflow invoke failed")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Ensure final_state is a dict
+    if not isinstance(final_state, dict):
+        final_state = {"result": final_state}
+
     final_strategy = final_state.get("final_decision")
     # validation / deterministic enforcement
     valid = True
@@ -131,6 +176,8 @@ async def strategy(req: StrategyRequest):
     response = {"final_strategy": final_strategy, "valid_schema": valid, "schema_error": schema_err}
     # include raw per-agent outputs for UI trace
     response["raw_state"] = final_state
+    # include thread id so UI can persist it for conversational memory
+    response["thread_id"] = thread_id
     return response
 
 @app.get("/")

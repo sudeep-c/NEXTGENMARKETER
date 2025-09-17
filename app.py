@@ -8,6 +8,8 @@ import json
 import pandas as pd
 from orchestrator import run_flow
 import os
+import time
+import traceback
 
 # Initialize session state for conversation memory
 if 'conversation_history' not in st.session_state:
@@ -40,6 +42,7 @@ def parse_agent_response(response_text):
 
 def truncate_text(text, max_length=300):
     """Truncate text at word boundaries to avoid cutting words in half"""
+    text = str(text)
     if len(text) <= max_length:
         return text
     
@@ -136,7 +139,6 @@ def load_sample_data():
 
 def get_system_metrics():
     """Get system performance metrics"""
-    import time
     import random
     
     # Check if we have real metrics from last analysis
@@ -238,7 +240,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS (added small tile styles for agent insights/recs)
 st.markdown("""
 <style>
     /* Main theme colors */
@@ -255,183 +257,37 @@ st.markdown("""
         --text-secondary: #64748b;
         --border-color: #e2e8f0;
     }
-    
-    /* Global styles */
-    .main .block-container {
-        padding-top: 0.5rem;
-        padding-bottom: 1rem;
-        max-width: 1200px;
-    }
-    
-    /* Header styling */
-    .main-header {
-        background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-        color: white;
-        padding: 1.2rem;
-        border-radius: 12px;
-        margin-bottom: 1.5rem;
-        text-align: center;
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
-    }
-    
-    .main-header h1 {
-        font-size: 2.2rem;
-        font-weight: 700;
-        margin: 0;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    
-    .main-header p {
-        font-size: 1.1rem;
-        margin: 0.3rem 0 0 0;
-        opacity: 0.9;
-    }
-    
-    /* Card styling */
-    .metric-card {
-        background: var(--card-background);
-        border-radius: 8px;
-        padding: 0.6rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        border: 1px solid var(--border-color);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        height: 80px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    }
-    
-    .metric-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: var(--primary-color);
-        margin: 0;
-        line-height: 1;
-    }
-    
-    .metric-label {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        margin: 0.2rem 0 0 0;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .metric-change {
-        font-size: 0.7rem;
-        margin-top: 0.2rem;
-    }
-    
-    .metric-change.positive {
-        color: var(--success-color);
-    }
-    
-    .metric-change.negative {
-        color: var(--error-color);
-    }
-    
-    /* Section headers */
-    .section-header {
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: var(--text-primary);
-        margin: 1.2rem 0 0.8rem 0;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 3px solid var(--primary-color);
-    }
-    
-    .subsection-header {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin: 0.8rem 0 0.5rem 0;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding-bottom: 0.3rem;
-    }
-    
-    /* Tile styling for outputs */
-    .output-tile {
-        background: #f8f9fa;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border: 1px solid #e9ecef;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-    }
-    
-    .output-tile h3 {
-        color: var(--primary-color);
-        margin: 0 0 1rem 0;
-        font-size: 1.2rem;
-        font-weight: 600;
-    }
-    
-    /* Light grey box for insights and recommendations */
-    .insight-box {
-        background: #f8f9fa;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid var(--primary-color);
-    }
-    
-    .recommendation-box {
-        background: #f8f9fa;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid var(--success-color);
-    }
-    
-    /* Button styling */
-    .stButton > button {
-        background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-        color: white;
-        border: none;
-        border-radius: 8px;
-        padding: 0.5rem 1.5rem;
-        font-weight: 500;
-        transition: all 0.2s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-    }
-    
-    /* File uploader styling */
-    .stFileUploader > div {
-        border: 2px dashed var(--border-color);
-        border-radius: 12px;
-        padding: 2rem;
-        text-align: center;
-        background: var(--background-color);
-        transition: border-color 0.2s ease;
-    }
-    
-    .stFileUploader > div:hover {
-        border-color: var(--primary-color);
-    }
-    
-    /* Sidebar styling */
-    .css-1d391kg {
-        background: linear-gradient(180deg, var(--primary-color), var(--secondary-color));
-    }
-    
-    /* Hide default Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    .main .block-container { padding-top: 0.5rem; padding-bottom: 1rem; max-width: 1200px; }
+
+    .main-header { background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white; padding: 1.2rem; border-radius: 12px; margin-bottom: 1.5rem; text-align: center; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2); }
+    .main-header h1 { font-size: 2.2rem; font-weight: 700; margin: 0; text-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .main-header p { font-size: 1.1rem; margin: 0.3rem 0 0 0; opacity: 0.9; }
+
+    /* Metric cards */
+    .metric-card { background: var(--card-background); border-radius: 8px; padding: 0.6rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); border: 1px solid var(--border-color); transition: transform 0.2s ease, box-shadow 0.2s ease; height: 80px; display: flex; flex-direction: column; justify-content: center; }
+    .metric-value { font-size: 1.6rem; font-weight: 700; color: var(--primary-color); margin: 0; line-height: 1; }
+    .metric-label { font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .section-header { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin: 1.2rem 0 0.8rem 0; display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.5rem; border-bottom: 3px solid var(--primary-color); }
+    .subsection-header { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); margin: 0.8rem 0 0.5rem 0; display: flex; align-items: center; gap: 0.5rem; padding-bottom: 0.3rem; }
+
+    .output-tile { background: #f8f9fa; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; border: 1px solid #e9ecef; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
+    .output-tile h3 { color: var(--primary-color); margin: 0 0 1rem 0; font-size: 1.2rem; font-weight: 600; }
+
+    .insight-box { background: #f8f9fa; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; border-left: 4px solid var(--primary-color); }
+    .recommendation-box { background: #f8f9fa; border-radius: 8px; padding: 1rem; margin: 0.5rem 0; border-left: 4px solid var(--success-color); }
+
+    /* Compact tile styles for agent insights/recs */
+    .insight-tile { background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); width: 280px; display:inline-block; vertical-align:top; }
+    .insight-tile .k { font-weight:700; color:var(--text-primary); font-size:13px; display:block; margin-bottom:4px; }
+    .insight-tile .v { font-size:13px; color:var(--text-secondary); display:block; margin-bottom:6px; }
+
+    .rec-tile { background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.04); width: 360px; display:inline-block; vertical-align:top; }
+    .rec-tile .idea { font-weight:700; font-size:14px; color:var(--primary-color); margin-bottom:6px; }
+    .rec-tile .conf { font-size:12px; color:var(--text-secondary); margin-bottom:4px; }
+
+    .stButton > button { background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); color: white; border: none; border-radius: 8px; padding: 0.5rem 1.5rem; font-weight: 500; transition: all 0.2s ease; }
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -642,8 +498,6 @@ with col2:
     
     # Documents Retrieved and Chroma Collections tiles removed
 
-# Recent Activity section removed
-
 # Main Query Section
 st.markdown('<div class="section-header">💬 AI Marketing Assistant</div>', unsafe_allow_html=True)
 
@@ -667,12 +521,43 @@ with col_btn3:
 if clear_btn:
     st.rerun()
 
+# Helper: render a compact insight tile (HTML)
+def render_insight_tile(insight: dict):
+    # expected insight keys: audience_segment, product_focus, region, signal, confidence (but robust)
+    audience = insight.get("audience_segment") or insight.get("audience") or insight.get("segment") or "-"
+    product = insight.get("product_focus") or insight.get("product") or "-"
+    region = insight.get("region") or insight.get("regions") or "-"
+    signal = insight.get("signal") or insight.get("note") or ""
+    confidence = insight.get("confidence")
+    conf_text = f"{confidence:.2f}" if isinstance(confidence, (float, int)) else (str(confidence) if confidence else "-")
+    html = f"""
+    <div class="insight-tile">
+      <div class="k">Audience</div><div class="v">{audience}</div>
+      <div class="k">Product</div><div class="v">{product}</div>
+      <div class="k">Region</div><div class="v">{region}</div>
+      <div class="k">Signal</div><div class="v">{truncate_text(signal, 120)}</div>
+      <div class="k">Confidence</div><div class="v">{conf_text}</div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+def render_rec_tile(rec: dict):
+    idea = rec.get("idea") or rec.get("campaign_name") or rec.get("concept") or str(rec)
+    confidence = rec.get("confidence")
+    conf_text = f"{confidence:.2f}" if isinstance(confidence, (float, int)) else (str(confidence) if confidence else "-")
+    html = f"""
+    <div class="rec-tile">
+      <div class="idea">{truncate_text(idea, 120)}</div>
+      <div class="conf">Confidence: {conf_text}</div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
 # Analysis Results with tile styling
 if analyze_btn and user_input:
     with st.spinner("🤖 AI agents are analyzing your request..."):
         try:
             # Track analysis start time
-            import time
             start_time = time.time()
             
             # Build conversation context
@@ -684,19 +569,28 @@ if analyze_btn and user_input:
                 enhanced_input = f"{context}\n\nCurrent question: {user_input}"
             
             # Run the multi-agent workflow with context
-            result = run_flow(enhanced_input)
-            
+            # NOTE: run_flow may raise exceptions; wrap in try/except to avoid crashing the UI
+            try:
+                thread_id = None
+                result = run_flow(enhanced_input, thread_id=thread_id)
+            except Exception as invoke_exc:
+                tb = traceback.format_exc()
+                st.error("❌ Error running the agent workflow. Check server logs for details.")
+                st.write("Error details (truncated):")
+                st.code(str(invoke_exc)[:1000])
+                print("Detailed traceback from run_flow():\n", tb)
+                result = {"error": str(invoke_exc)}
+
             # Calculate actual metrics
             end_time = time.time()
             actual_latency = round(end_time - start_time, 2)
             
             # Update system metrics with real data
-            if 'agent_outputs' in result:
-                # Estimate token usage based on response length
+            estimated_tokens = 0
+            if isinstance(result, dict) and 'agent_outputs' in result:
                 total_chars = sum(len(str(output)) for output in result['agent_outputs'])
                 estimated_tokens = total_chars // 4  # Rough estimation
                 
-            # Store metrics in session state for display
             st.session_state['last_analysis_metrics'] = {
                 'tokens_used': estimated_tokens,
                 'latency': actual_latency,
@@ -709,171 +603,160 @@ if analyze_btn and user_input:
             # Display results with modern tile styling
             st.success("✅ Analysis Complete!")
             
-            # Show agent outputs in tiles
-            if "agent_outputs" in result:
+            # Show agent outputs in compact tiles — only for routed agents
+            if isinstance(result, dict) and "agent_outputs" in result:
                 st.markdown('<div class="section-header">📊 Agent Insights</div>', unsafe_allow_html=True)
                 
-                agent_names = ["Sentiment", "Purchase", "Campaign"]
-                for i, output in enumerate(result["agent_outputs"]):
-                    agent_name = agent_names[i] if i < len(agent_names) else f"Agent {i+1}"
-                    
-                    with st.expander(f"🤖 {agent_name} Agent", expanded=True):
-                        # Parse the output if it contains JSON
+                agent_outputs = result.get("agent_outputs", []) or []
+                routed_agents = [r.lower() for r in result.get("route", [])] if result.get("route") else []
+                
+                # For each agent that ran, show a card with compact tiles for insights & recommendations
+                for output in agent_outputs:
+                    agent_key = output.get("agent", "").lower()
+                    agent_label = agent_key.capitalize() if agent_key else "Agent"
+                    # Only show if agent was routed/run
+                    if agent_key not in routed_agents:
+                        continue
+                    with st.expander(f"🤖 {agent_label} Agent", expanded=False):
+                        # parse summary fields if needed
                         parsed_output = output.copy()
-                        
-                        # If summary is a JSON string, parse it
                         if "summary" in output and isinstance(output["summary"], str):
-                            parsed_summary = parse_agent_response(output["summary"])
-                            if isinstance(parsed_summary, dict):
-                                # Merge parsed JSON fields into the output
-                                parsed_output.update(parsed_summary)
+                            parsed = parse_agent_response(output["summary"])
+                            if isinstance(parsed, dict):
+                                parsed_output.update(parsed)
                         
-                        # Display only top 3 insights and recommendations in light grey boxes
-                        if "insights" in parsed_output and parsed_output["insights"]:
-                            st.markdown("<h3>💡 Insights</h3>", unsafe_allow_html=True)
-                            # Ensure insights is a list and limit to top 3
-                            insights = parsed_output["insights"]
-                            if isinstance(insights, list):
-                                insights = insights[:3]
-                            else:
-                                insights = [str(insights)]
-                            
-                            for insight in insights:
-                                # Clean and format insight text
-                                cleaned_insight = clean_insight_text(insight)
-                                # Truncate long insights at word boundaries
-                                truncated_insight = truncate_text(cleaned_insight, 300)
-                                st.markdown(f'<div class="insight-box">• {truncated_insight}</div>', unsafe_allow_html=True)
+                        # Insights: expect list of dicts (insight objects)
+                        insights = parsed_output.get("insights") or []
+                        if isinstance(insights, dict):
+                            # sometimes one dict
+                            insights = [insights]
+                        if insights:
+                            st.markdown("<div style='margin-bottom:6px;'><strong style='color:#6366f1;'>💡 Insights</strong></div>", unsafe_allow_html=True)
+                            # render tiles inline
+                            for ins in insights[:6]:  # cap to avoid too many
+                                if isinstance(ins, (str, int, float)):
+                                    # if string, render as single signal
+                                    st.markdown(f"<div class='insight-tile'><div class='k'>Signal</div><div class='v'>{truncate_text(str(ins), 140)}</div></div>", unsafe_allow_html=True)
+                                elif isinstance(ins, dict):
+                                    render_insight_tile(ins)
+                                else:
+                                    render_insight_tile({"signal": str(ins)})
+                        else:
+                            st.markdown("<div style='color:gray; font-style:italic;'>No insights produced by this agent.</div>", unsafe_allow_html=True)
                         
-                        if "recommendations" in parsed_output and parsed_output["recommendations"]:
-                            st.markdown("<h3>🎯 Recommendations</h3>", unsafe_allow_html=True)
-                            # Ensure recommendations is a list and limit to top 3
-                            recommendations = parsed_output["recommendations"]
-                            if isinstance(recommendations, list):
-                                recommendations = recommendations[:3]
-                            else:
-                                recommendations = [str(recommendations)]
-                            
-                            for rec in recommendations:
-                                # Clean and format recommendation text
-                                cleaned_rec = clean_insight_text(rec)
-                                # Truncate long recommendations at word boundaries
-                                truncated_rec = truncate_text(cleaned_rec, 300)
-                                st.markdown(f'<div class="recommendation-box">• {truncated_rec}</div>', unsafe_allow_html=True)
+                        # Recommendations: list of dicts or strings
+                        recs = parsed_output.get("recommendations") or parsed_output.get("recommendation") or []
+                        if isinstance(recs, dict):
+                            recs = [recs]
+                        if recs:
+                            st.markdown("<div style='margin-top:8px;'><strong style='color:#10b981;'>🎯 Recommendations</strong></div>", unsafe_allow_html=True)
+                            for r in recs[:6]:
+                                if isinstance(r, str):
+                                    render_rec_tile({"idea": r})
+                                elif isinstance(r, dict):
+                                    render_rec_tile(r)
+                                else:
+                                    render_rec_tile({"idea": str(r)})
+                        else:
+                            st.markdown("<div style='color:gray; font-style:italic; margin-top:6px;'>No recommendations produced by this agent.</div>", unsafe_allow_html=True)
             
-            # Show final decision in a prominent tile
-            if "final_decision" in result:
+            # Show final decision in a prominent tile (Marketer)
+            final = {}
+            if isinstance(result, dict):
+                final = result.get("final_decision") or result.get("final_strategy") or {}
+            
+            if final:
                 st.markdown('<div class="section-header">🎯 Final Marketing Strategy</div>', unsafe_allow_html=True)
-                final = result["final_decision"]
                 
-                # Parse final decision if it's a JSON string
-                parsed_final = final.copy()
-                if isinstance(final, dict):
-                    # Check if any field contains JSON strings
-                    for key, value in final.items():
-                        if isinstance(value, str) and (value.strip().startswith('{') or value.strip().startswith('```json')):
-                            parsed_value = parse_agent_response(value)
-                            if isinstance(parsed_value, dict):
-                                parsed_final.update(parsed_value)
+                parsed_final = final.copy() if isinstance(final, dict) else {}
+                if not parsed_final and isinstance(final, str):
+                    parsed_final = parse_agent_response(final) if isinstance(final, str) else {}
                 
-                # Display only top 3 key findings and strategic recommendations in light grey boxes
+                # Key Findings — show as small tiles (but keep fallback)
                 if "key_findings" in parsed_final and parsed_final["key_findings"]:
                     st.markdown("<h3>🔍 Key Findings</h3>", unsafe_allow_html=True)
-                    key_findings = parsed_final["key_findings"]
-                    findings_list = []
-                    
-                    if isinstance(key_findings, dict):
-                        for category, findings in key_findings.items():
-                            if isinstance(findings, dict):
-                                for key, value in findings.items():
-                                    findings_list.append(f"{key}: {value}")
+                    kf = parsed_final["key_findings"]
+                    # Flatten and show up to 6 items
+                    items = []
+                    if isinstance(kf, dict):
+                        for cat, vals in kf.items():
+                            if isinstance(vals, list):
+                                for v in vals:
+                                    items.append(f"{cat}: {v}")
+                            elif isinstance(vals, dict):
+                                for kk, vv in vals.items():
+                                    items.append(f"{cat} - {kk}: {vv}")
                             else:
-                                findings_list.append(str(findings))
-                    elif isinstance(key_findings, list):
-                        findings_list = [str(finding) for finding in key_findings]
-                    elif isinstance(key_findings, str):
-                        # If key_findings is a JSON string, parse it
-                        parsed_findings = parse_agent_response(key_findings)
-                        if isinstance(parsed_findings, dict) and "key_findings" in parsed_findings:
-                            findings_list = [str(finding) for finding in parsed_findings["key_findings"]]
-                        else:
-                            findings_list = [key_findings]
-                    
-                    # Limit to top 3 findings
-                    if isinstance(findings_list, list):
-                        findings_list = findings_list[:3]
+                                items.append(f"{cat}: {vals}")
+                    elif isinstance(kf, list):
+                        items = [str(x) for x in kf]
                     else:
-                        findings_list = [str(findings_list)]
+                        items = [str(kf)]
                     
-                    for finding in findings_list:
-                        # Clean and format finding text
-                        cleaned_finding = clean_insight_text(finding)
-                        truncated_finding = truncate_text(cleaned_finding, 300)
-                        st.markdown(f'<div class="insight-box">• {truncated_finding}</div>', unsafe_allow_html=True)
+                    for it in items[:6]:
+                        st.markdown(f'<div class="insight-tile"><div class="k">Finding</div><div class="v">{truncate_text(it, 160)}</div></div>', unsafe_allow_html=True)
                 else:
-                    # Fallback: Show executive summary or raw content if key_findings is empty
                     st.markdown("<h3>🔍 Key Findings</h3>", unsafe_allow_html=True)
+                    # fallback: executive summary
                     if "executive_summary" in parsed_final and parsed_final["executive_summary"]:
                         summary = clean_insight_text(str(parsed_final["executive_summary"]))
                         truncated_summary = truncate_text(summary, 300)
                         st.markdown(f'<div class="insight-box">• {truncated_summary}</div>', unsafe_allow_html=True)
                     else:
-                        # Show raw content as fallback
-                        raw_content = str(parsed_final)
-                        if len(raw_content) > 50:  # Only show if there's substantial content
-                            cleaned_content = clean_insight_text(raw_content)
-                            truncated_content = truncate_text(cleaned_content, 300)
-                            st.markdown(f'<div class="insight-box">• {truncated_content}</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="insight-box">• No key findings available</div>', unsafe_allow_html=True)
                 
-                # Display strategic recommendations
-                if "strategic_recommendations" in parsed_final and parsed_final["strategic_recommendations"]:
-                    st.markdown("<h3>🎯 Strategic Recommendations</h3>", unsafe_allow_html=True)
-                    recommendations = parsed_final["strategic_recommendations"]
-                    recs_list = []
-                    
-                    if isinstance(recommendations, list):
-                        recs_list = [str(rec) for rec in recommendations]
-                    elif isinstance(recommendations, str):
-                        # If recommendations is a JSON string, parse it
-                        parsed_recs = parse_agent_response(recommendations)
-                        if isinstance(parsed_recs, dict) and "strategic_recommendations" in parsed_recs:
-                            recs_list = [str(rec) for rec in parsed_recs["strategic_recommendations"]]
-                        else:
-                            recs_list = [recommendations]
-                    
-                    # Limit to top 3 recommendations
-                    if isinstance(recs_list, list):
-                        recs_list = recs_list[:3]
-                    else:
-                        recs_list = [str(recs_list)]
-                    
-                    for rec in recs_list:
-                        # Clean and format recommendation text
-                        cleaned_rec = clean_insight_text(rec)
-                        truncated_rec = truncate_text(cleaned_rec, 300)
-                        st.markdown(f'<div class="recommendation-box">• {truncated_rec}</div>', unsafe_allow_html=True)
+                # Strategic recommendations (prefer final_campaign if present)
+                st.markdown("<h3>🎯 Strategic Recommendations</h3>", unsafe_allow_html=True)
+                recs_list = []
+                # prefer final_campaign -> strategic_recommendations -> recommendations
+                if isinstance(parsed_final.get("final_campaign"), dict) and parsed_final.get("final_campaign"):
+                    fc = parsed_final["final_campaign"]
+                    # display the campaign as one rec-tile
+                    render_rec_tile({
+                        "idea": f"{fc.get('campaign_name', 'Campaign')} — {fc.get('concept', '')}",
+                        "confidence": fc.get("confidence", parsed_final.get("confidence"))
+                    })
                 else:
-                    # Fallback: Show conflicts or other available content if strategic_recommendations is empty
-                    st.markdown("<h3>🎯 Strategic Recommendations</h3>", unsafe_allow_html=True)
-                    if "conflicts" in parsed_final and parsed_final["conflicts"]:
-                        conflicts = parsed_final["conflicts"]
-                        if isinstance(conflicts, list) and conflicts:
-                            for conflict in conflicts[:3]:  # Show top 3 conflicts
-                                cleaned_conflict = clean_insight_text(str(conflict))
-                                truncated_conflict = truncate_text(cleaned_conflict, 300)
-                                st.markdown(f'<div class="recommendation-box">• {truncated_conflict}</div>', unsafe_allow_html=True)
+                    sr = parsed_final.get("strategic_recommendations") or parsed_final.get("strategic_recs") or parsed_final.get("recommendations") or []
+                    if isinstance(sr, dict):
+                        # flatten dict values
+                        for v in sr.values():
+                            if isinstance(v, list):
+                                for x in v:
+                                    recs_list.append(x)
+                            else:
+                                recs_list.append(v)
+                    elif isinstance(sr, list):
+                        recs_list = sr
+                    elif isinstance(sr, str):
+                        recs_list = [sr]
+                    
+                    if recs_list:
+                        for rr in recs_list[:6]:
+                            if isinstance(rr, str):
+                                render_rec_tile({"idea": rr})
+                            elif isinstance(rr, dict):
+                                render_rec_tile(rr)
+                            else:
+                                render_rec_tile({"idea": str(rr)})
+                    else:
+                        # fallback: conflicts or none
+                        if "conflicts" in parsed_final and parsed_final["conflicts"]:
+                            for c in parsed_final["conflicts"][:3]:
+                                st.markdown(f'<div class="recommendation-box">• {clean_insight_text(str(c))}</div>', unsafe_allow_html=True)
                         else:
                             st.markdown('<div class="recommendation-box">• No specific recommendations available at this time</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown('<div class="recommendation-box">• No specific recommendations available at this time</div>', unsafe_allow_html=True)
             
             # Show raw JSON for debugging
             with st.expander("🔧 Raw Results (Debug)"):
                 st.json(result)
                 
         except Exception as e:
+            # This outer except ensures any unexpected UI errors are caught and shown
+            tb = traceback.format_exc()
             st.error(f"❌ Error during analysis: {str(e)}")
             st.info("Please check that all services are running and try again.")
+            print("Unexpected exception in analysis flow:", tb)
 
 # Footer
 st.markdown("---")
